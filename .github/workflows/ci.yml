@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Each job shows up as its own "CI / <name>" check for branch protection.
+
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Format, lint, and type checks (Vite+: Oxfmt, Oxlint, tsgolint).
+      - run: npm run check
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      # Builds dist/ (ESM, CJS, UMD) and validates package.json with publint.
+      - run: npm run build
+
+      # Package exports and UMD bundles, in Node (Vitest).
+      - run: npm run test:unit
+
+      # The suite uses the real Chrome channel (H.264 playback), which is
+      # preinstalled on GitHub's Ubuntu runners.
+      - name: Chrome version
+        run: google-chrome --version
+
+      - name: Browser tests (dist/player.js)
+        run: npm run test:e2e
+
+      - name: Browser tests (dist/player.min.js)
+        run: npm run test:e2e
+        env:
+          PLAYERJS_BUNDLE: dist/player.min.js
+
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
